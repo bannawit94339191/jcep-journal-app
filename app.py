@@ -4,23 +4,24 @@ import os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import json  # เพิ่มสำหรับการดึงรหัสจาก Secrets
+import json
 
 
 # ==========================================
-# 1. ตั้งค่าการเชื่อมต่อ Google Sheets (แบบความปลอดภัยสูง)
+# 1. ตั้งค่าการเชื่อมต่อ Google Sheets (ใช้ Secrets)
 # ==========================================
-@st.cache_resource  # ช่วยให้แอปไม่โหลดช้าตอนกดสลับเมนู
+@st.cache_resource
 def init_sheets():
+    # กำหนดสิทธิ์การเข้าถึง
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
     try:
-        # ดึงรหัสผ่านจาก Streamlit Secrets ที่วางไว้ในหน้าเว็บ
-        creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        # ดึงรหัสผ่านจาก Streamlit Secrets (ต้องตั้งชื่อ GOOGLE_CREDENTIALS)
+        creds_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
         client = gspread.authorize(creds)
 
-        # เชื่อมต่อกับไฟล์ชีต
+        # เชื่อมต่อกับไฟล์ Google Sheets ชื่อ JCEP_Database
         sheet = client.open("JCEP_Database").sheet1
         return sheet
     except Exception as e:
@@ -28,12 +29,12 @@ def init_sheets():
         return None
 
 
-# เรียกใช้งานฟังก์ชันเพื่อสร้างตัวแปร sheet
+# เรียกใช้งานการเชื่อมต่อ
 sheet = init_sheets()
 
-# เช็คว่าเชื่อมต่อสำเร็จไหมก่อนเริ่มรันหน้าเว็บ
+# ถ้าเชื่อมต่อไม่ได้ ให้หยุดการทำงานและแจ้งเตือน
 if sheet is None:
-    st.warning("⚠️ กรุณาตรวจสอบการตั้งค่า Secrets ใน Streamlit Cloud")
+    st.warning("⚠️ ไม่สามารถเชื่อมต่อฐานข้อมูลได้ โปรดเช็คค่า Secrets ใน Streamlit Cloud")
     st.stop()
 
 # ==========================================
@@ -44,10 +45,6 @@ st.set_page_config(
     page_icon="logo-jcep.png",
     layout="wide"
 )
-
-# สร้างโฟลเดอร์เก็บไฟล์แนบ (เผื่อไว้ในกรณีรัน Local)
-if not os.path.exists("uploads"):
-    os.makedirs("uploads")
 
 # ==========================================
 # 3. ตกแต่ง CSS (ปุ่มสีต่างๆ และ Footer)
@@ -62,12 +59,15 @@ st.markdown("""
         border-radius: 6px !important;
         transition: all 0.3s ease !important; 
     }
+
+    /* ปุ่ม ส่งข้อมูล (Send) - สีเขียว */
     div[data-testid="stButton"] button:has(p:contains("ส่งข้อมูล (Send)")) {
         background-color: #28a745 !important; 
         border: 1px solid #28a745 !important;              
     }
     div[data-testid="stButton"] button:has(p:contains("ส่งข้อมูล (Send)")) p { color: white !important; }
 
+    /* ปุ่ม ยกเลิก (Cancel) - สีแดง */
     div[data-testid="stButton"] button:has(p:contains("ยกเลิก (Cancel)")) {
         background-color: #dc3545 !important;
         border: 1px solid #dc3545 !important; 
@@ -106,7 +106,6 @@ if menu == "📝 หน้าส่งข้อมูลวารสาร (User
     st.subheader("Journal of Cooperative Education Progress")
     st.divider()
 
-    # ดึงลำดับที่ล่าสุด
     all_values = sheet.get_all_values()
     current_id = len(all_values)
 
@@ -162,8 +161,6 @@ if menu == "📝 หน้าส่งข้อมูลวารสาร (User
             filename = "ไม่มีไฟล์แนบ"
             if uploaded_file is not None:
                 filename = f"ID{current_id}_{uploaded_file.name}"
-                # บน Streamlit Cloud ไฟล์จะหายไปเมื่อรีสตาร์ท แต่เราบันทึกชื่อไว้ใน Sheet แล้ว
-                # หากต้องการเก็บไฟล์ถาวร แนะนำให้ใช้ Google Drive API เพิ่มเติมในอนาคตครับ
 
             row = [
                 current_id, name, university, faculty, major, agency,
@@ -172,7 +169,7 @@ if menu == "📝 หน้าส่งข้อมูลวารสาร (User
             ]
 
             sheet.append_row(row)
-            st.success(f"✅ บันทึกข้อมูลลำดับที่ {current_id} ลง Google Sheets สำเร็จ!")
+            st.success(f"✅ บันทึกข้อมูลลำดับที่ {current_id} สำเร็จ!")
 
 # ==========================================
 # 6. หน้า Admin: Dashboard
@@ -191,7 +188,7 @@ elif menu == "📊 หน้าสรุปข้อมูล (Admin)":
     else:
         col_title, col_logout = st.columns([8, 2])
         with col_title:
-            st.header("📊 Dashboard ข้อมูลจาก Google Sheets")
+            st.header("📊 Dashboard ข้อมูล")
         with col_logout:
             if st.button("Logout"):
                 st.session_state['logged_in'] = False
@@ -200,11 +197,10 @@ elif menu == "📊 หน้าสรุปข้อมูล (Admin)":
         data = sheet.get_all_records()
         if data:
             df = pd.DataFrame(data)
-            st.write(f"**จำนวนทั้งหมด:** {len(df)} รายการ")
             st.dataframe(df, use_container_width=True)
             csv = df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("📥 Export CSV", data=csv, file_name="jcep_data.csv", mime="text/csv")
         else:
-            st.info("ยังไม่มีข้อมูลในระบบ")
+            st.info("ยังไม่มีข้อมูล")
 
 st.markdown('<div class="footer">Update by Bannawit S. (OCE - RMUTK)</div>', unsafe_allow_html=True)
